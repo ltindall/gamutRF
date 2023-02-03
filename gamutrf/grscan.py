@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 import logging
 import sys
+import wavelearner
 
 try:
     from gnuradio import blocks  # pytype: disable=import-error
@@ -61,6 +62,7 @@ class grscan(gr.top_block):
         )
 
         self.retune_fft = None
+        fft_batch_size = 8
         if iqtlabs:
             freq_range = freq_end - freq_start
             tune_step_hz = int(samp_rate * tune_overlap)
@@ -84,16 +86,16 @@ class grscan(gr.top_block):
                 tune_step_hz,
                 tune_step_fft,
             )
-        self.fft_vxx_0 = fft.fft_vcc(
-            fft_size, True, window.blackmanharris(fft_size), True, 1
-        )
+        #self.fft_vxx_0 = fft.fft_vcc(fft_size, True, window.blackmanharris(fft_size), True, 1)
+        self.fft_vxx_0 = wavelearner.fft(int(fft_batch_size*fft_size), (fft_size), True)
         self.blocks_stream_to_vector_0 = blocks.stream_to_vector(
-            gr.sizeof_gr_complex, fft_size
+            gr.sizeof_gr_complex, fft_batch_size*fft_size
         )
         zmq_addr = f"tcp://{logaddr}:{logport}"
         logging.info("serving FFT on %s", zmq_addr)
         self.zeromq_pub_sink_0 = zeromq.pub_sink(1, 1, zmq_addr, 100, False, -1, "")
         self.blocks_complex_to_mag_0 = blocks.complex_to_mag(fft_size)
+        self.blocks_vector_to_stream_0 = blocks.vector_to_stream(gr.sizeof_gr_complex*fft_size, fft_batch_size)
 
         ##################################################
         # Connections
@@ -102,7 +104,8 @@ class grscan(gr.top_block):
         if self.retune_fft:
             self.msg_connect((self.retune_fft, "tune"), (self.source_0, self.cmd_port))
             self.connect((self.blocks_stream_to_vector_0, 0), (self.fft_vxx_0, 0))
-            self.connect((self.fft_vxx_0, 0), (self.blocks_complex_to_mag_0, 0))
+            self.connect((self.fft_vxx_0, 0), (self.blocks_vector_to_stream_0, 0))
+            self.connect((self.blocks_vector_to_stream_0, 0), (self.blocks_complex_to_mag_0, 0))
             self.connect((self.blocks_complex_to_mag_0, 0), (self.retune_fft, 0))
             self.connect((self.retune_fft, 0), (self.zeromq_pub_sink_0, 0))
             self.connect((self.source_0, 0), (self.blocks_stream_to_vector_0, 0))
