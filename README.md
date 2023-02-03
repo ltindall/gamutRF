@@ -1,3 +1,14 @@
+
+*** fork for AIRT support ***
+
+Runs outside of docker; use pip3 install ., inside conda environment.
+
+```
+$ gamutrf-scan --sdr=SoapyAIRT --freq-start=70e6 --freq-end=6e9 --sweep-sec=0.01 --samp-rate=124.5184e6 --nfft 256
+$ gamutrf-sigfinder --freq-start=70e6 --freq-end=6e9 --promport=9009 --fftgraph fft.png
+
+```
+
 # gamutRF
 
 An SDR orchestrated scanner and collector.
