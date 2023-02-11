@@ -154,8 +154,7 @@ def main():
 
     # ensure tuning tags arrive on FFT window boundaries.
     if options.samp_rate % options.nfft:
-        print("NFFT must be a factor of sample rate")
-        sys.exit(1)
+        print("warning: NFFT should be a factor of sample rate to avoid overlapping windows")
 
     prom_vars = init_prom_vars()
     prom_vars["freq_start_hz"].set(options.freq_start)
