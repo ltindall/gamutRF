@@ -2,6 +2,10 @@
 
 ## install prerequisites
 
+Ensure you have the latest docker installed, and also qemu:
+
+```apt-get install -y qemu-user-static```
+
 Build gnuradio with soapy frequency tuning command patches, on x86 host,
 if you do not already have the ```anarkiwi-airt-gnuradio``` channel.
 
