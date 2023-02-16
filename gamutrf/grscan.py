@@ -63,7 +63,7 @@ class grscan(gr.top_block):
         )
 
         self.retune_fft = None
-        fft_batch_size = 8
+        fft_batch_size = 1024
         if iqtlabs:
             freq_range = freq_end - freq_start
             tune_step_hz = int(samp_rate * tune_overlap)
