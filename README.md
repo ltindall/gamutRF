@@ -103,7 +103,7 @@ $ pip3 install .
 run gamutrf (may need to change sample rate depending on SDR).
 
 ```
-$ gamutrf-scan --sdr=SoapyAIRT --freq-start=300e6 --freq-end=6e9 --sweep-sec=0.01 --samp-rate=124.5184e6 --nfft 256
+$ gamutrf-scan --sdr=SoapyAIRT --freq-start=300e6 --freq-end=6e9 --tune-step-fft 2048 --samp-rate=124.5184e6 --nfft 256
 $ gamutrf-sigfinder --freq-start=300e6 --freq-end=6e9 --promport=9009 --fftgraph fft.png --port 9005 --nfftplots 1 --buff_path /tmp/
 ```
 
