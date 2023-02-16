@@ -34,6 +34,7 @@ class grscan(gr.top_block):
         fft_size=1024,
         tune_overlap=0.5,
         tune_step_fft=0,
+        skip_tune_step_fft=0,
         iqtlabs=None,
     ):
         gr.top_block.__init__(self, "scan", catch_exceptions=True)
@@ -86,6 +87,7 @@ class grscan(gr.top_block):
                 int(freq_end),
                 tune_step_hz,
                 tune_step_fft,
+                skip_tune_step_fft,
             )
         #self.fft_vxx_0 = fft.fft_vcc(fft_size, True, window.blackmanharris(fft_size), True, 1)
         self.fft_vxx_0 = wavelearner.fft(int(fft_batch_size*fft_size), (fft_size), True)
