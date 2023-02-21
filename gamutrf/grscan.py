@@ -88,6 +88,7 @@ class grscan(gr.top_block):
                 tune_step_hz,
                 tune_step_fft,
                 skip_tune_step_fft,
+                True,
             )
         #self.fft_vxx_0 = fft.fft_vcc(fft_size, True, window.blackmanharris(fft_size), True, 1)
         self.fft_vxx_0 = wavelearner.fft(int(fft_batch_size*fft_size), (fft_size), True)
