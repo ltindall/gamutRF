@@ -1,4 +1,5 @@
 import argparse
+import os
 import matplotlib.pyplot as plt
 import numpy as np 
 import time
@@ -27,9 +28,7 @@ def follow(thefile):
 
 def draw_waterfall(mesh, fig, data, cmap): 
     mesh.set_array(cmap(data))
-    fig.colorbar(mesh)
     fig.canvas.draw()
-
     plt.pause(0.01)
 
 
@@ -49,8 +48,8 @@ def main():
 
     fig, ax = plt.subplots(figsize=(16,8))
     cmap = plt.get_cmap('turbo')
-    db_min = -30
-    db_max = 0
+    db_min = -40
+    db_max = 15
     waterfall_height = 100 # number of waterfall rows 
     scale = 1e6
     min_freq = 300e6/scale
@@ -62,12 +61,22 @@ def main():
     db_data.fill(np.nan)
     mesh = ax.pcolormesh(X,Y, db_data, shading="nearest")
     ax.set_xlabel("MHz")
+    ax.set_ylabel("Time")
+    sm = plt.cm.ScalarMappable(cmap=cmap)
+    sm.set_clim(vmin=db_min, vmax=db_max)
+    fig.colorbar(sm, ax=ax)
     
 
     #waterfall = []
     waterfall_row = []
     freq_idx = 0
     db_idx = 2
+    if not os.path.exists(args.fftlog): 
+        print(f"Waiting for {args.fftlog}...")
+        while not os.path.exists(args.fftlog): 
+            time.sleep(1)
+        print(f"Found {args.fftlog}. Starting waterfall plot.")
+    
     with open(args.fftlog,"r") as logfile: 
         loglines = follow(logfile)
         for line in loglines:
