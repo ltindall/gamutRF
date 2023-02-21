@@ -198,7 +198,8 @@ def process_fft(args, prom_vars, ts, fftbuffer, lastbins, running_df, last_dfs):
         )
         logging.warning(df[freqdiffs > mindiff * 2])
     if args.fftlog:
-        df.to_csv(args.fftlog, sep="\t", index=False)
+        #df.to_csv(args.fftlog, sep="\t", index=False)
+        df.to_csv(args.fftlog, sep="\t", mode="a", header=False, index=False)
     monitor_bins = set()
     peak_dbs = {}
     bin_freq_count = prom_vars["bin_freq_count"]
@@ -478,6 +479,8 @@ def fft_proxy(args, buff_file, buffer_time=FFT_BUFFER_TIME, shutdown_str=None):
 
 def find_signals(args, prom_vars):
     buff_file = os.path.join(args.buff_path, BUFF_FILE)
+    if args.fftlog and os.path.exists(args.fftlog):
+        os.remove(args.fftlog)
     with concurrent.futures.ProcessPoolExecutor(2) as executor:
         proxy_result = executor.submit(fft_proxy, args, buff_file)
         process_fft_lines(args, prom_vars, buff_file, executor, proxy_result)
