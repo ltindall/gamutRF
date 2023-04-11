@@ -1,6 +1,7 @@
 import logging
 import signal
 import sys
+import time
 from argparse import ArgumentParser
 
 try:
@@ -172,6 +173,11 @@ def argument_parser():
         default=2048,
         help="vector length for wavelearner",
     )
+    parser.add_argument(
+        "--disable_wavelearner_fft",
+        action="store_true", 
+        help="disable GR-Wavelearner for FFT",
+    )
     return parser
 
 
@@ -237,6 +243,7 @@ def main():
         inference_input_len=options.inference_input_len,
         iqtlabs=iqtlabs,
         wavelearner=wavelearner,
+        disable_wavelearner_fft=options.disable_wavelearner_fft,
     )
 
     def sig_handler(_sig=None, _frame=None):
@@ -247,5 +254,33 @@ def main():
     signal.signal(signal.SIGINT, sig_handler)
     signal.signal(signal.SIGTERM, sig_handler)
 
+    # object_methods = [method_name for method_name in dir(tb.source_0) if callable(getattr(tb.source_0, method_name))]
+    # print(f"\n{object_methods=}\n")
+    # time.sleep(2)
+    # tb.source_0.set_bandwidth(0, 0.5*options.samp_rate)
+
+
     tb.start()
+
+    time.sleep(0.1)
+    tb.source_0.set_sample_rate(0, 20e6)
+    tb.source_0.set_bandwidth(0, 0.5*options.samp_rate)
+    print(f"\n{tb.source_0.get_bandwidth(0)=}\n")
+    time.sleep(0.5)
+    tb.source_0.set_sample_rate(0, options.samp_rate)
+    tb.source_0.set_bandwidth(0, options.samp_rate)
+    print(f"\n{tb.source_0.get_bandwidth(0)=}\n")
+
+    # time.sleep(0.01) 
+    # print(f"Setting dummy sample rate!\n")
+    # #tb.lock()
+    # tb.source_0.set_sample_rate(0, 20e6)
+    # tb.source_0.set_bandwidth(0, 20e6)
+    # #tb.unlock()
+    # time.sleep(1)
+    # print(f"Setting correct sample rate {options.samp_rate}!\n")
+    # #tb.lock()
+    # tb.source_0.set_sample_rate(0, options.samp_rate)
+    # tb.source_0.set_bandwidth(0, options.samp_rate)
+    # #tb.unlock()
     tb.wait()

@@ -3,6 +3,7 @@
 import logging
 import os
 import sys
+from pathlib import Path
 
 try:
     from gnuradio import blocks  # pytype: disable=import-error
@@ -42,6 +43,7 @@ class grscan(gr.top_block):
         inference_input_len=2048,
         iqtlabs=None,
         wavelearner=None,
+        disable_wavelearner_fft=False,
     ):
         gr.top_block.__init__(self, "scan", catch_exceptions=True)
 
@@ -53,6 +55,7 @@ class grscan(gr.top_block):
         self.sweep_sec = sweep_sec
         self.fft_size = fft_size
         self.wavelearner = wavelearner
+        self.disable_wavelearner_fft = disable_wavelearner_fft
 
         ##################################################
         # Blocks
@@ -76,6 +79,7 @@ class grscan(gr.top_block):
         ]
         self.samples_blocks = []
         if write_samples:
+            Path(sample_dir).mkdir(parents=True, exist_ok=True)
             self.samples_blocks.extend(
                 [
                     blocks.stream_to_vector(gr.sizeof_gr_complex, fft_size),
@@ -171,12 +175,16 @@ class grscan(gr.top_block):
             last_block = block
 
     def get_fft_blocks(self, fft_size, sdr):
-        if self.wavelearner:
+        if self.wavelearner and not self.disable_wavelearner_fft:
+            print("\n\n USE WAVELEARNER FFT \n\n")
             fft_batch_size = 256
             return (
                 [
                     blocks.stream_to_vector(
                         gr.sizeof_gr_complex, fft_batch_size * fft_size
+                    ),
+                    blocks.multiply_const_vff(
+                        [val for val in window.hann(fft_size) for _ in range(2)] * fft_batch_size
                     ),
                     self.wavelearner.fft(
                         int(fft_batch_size * fft_size), (fft_size), True
@@ -187,6 +195,7 @@ class grscan(gr.top_block):
                 ],
                 True,
             )
+        print("\n\n Don't use wavelearner fft \n\n")
         return (
             [
                 blocks.stream_to_vector(gr.sizeof_gr_complex, fft_size),
