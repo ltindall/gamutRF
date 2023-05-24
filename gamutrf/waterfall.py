@@ -92,8 +92,8 @@ def main():
 
     # OTHER PARAMETERS
     cmap = plt.get_cmap("turbo")
-    db_min = -50
-    db_max = 15
+    db_min = -200
+    db_max = -120
     snr_min = 0
     snr_max = 50
     waterfall_height = 100  # number of waterfall rows

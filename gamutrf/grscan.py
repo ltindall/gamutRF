@@ -144,7 +144,7 @@ class grscan(gr.top_block):
                     True,
                     inference_input_len * inference_batch_size,
                     output_len * inference_batch_size,
-                    inference_batch_size,
+                    1,
                 ),
                 iqtlabs.write_freq_samples(
                     "rx_freq",
