@@ -20,7 +20,7 @@ from gamutrf.sigfinder import ok_response
 from gamutrf.sigfinder import process_scans
 from gamutrf.sigwindows import ROLLING_FACTOR
 from gamutrf.utils import rotate_file_n
-from gamutrf.zmqreceiver import fft_proxy, ZmqReceiver
+from gamutrf.zmqreceiver import fft_proxy, ZmqReceiver, parse_scanners
 
 
 def null_proxy(*args, **kwargs):
@@ -85,8 +85,7 @@ class FakeArgs:
         history,
         recorder,
         fftgraph,
-        logaddr,
-        logport,
+        scanners,
         nfftgraph,
         max_recorder_signals,
         running_fft_secs,
@@ -107,8 +106,7 @@ class FakeArgs:
         self.history = history
         self.recorder = recorder
         self.fftgraph = fftgraph
-        self.logaddr = logaddr
-        self.logport = logport
+        self.scanners = scanners
         self.nfftgraph = nfftgraph
         self.max_recorder_signals = max_recorder_signals
         self.running_fft_secs = running_fft_secs
@@ -167,8 +165,7 @@ class SigFinderTestCase(unittest.TestCase):
                     1,
                     "",
                     test_fftgraph,
-                    "127.0.0.1",
-                    9999,
+                    "127.0.0.1:9999",
                     10,
                     1,
                     1,
@@ -176,7 +173,9 @@ class SigFinderTestCase(unittest.TestCase):
                     0,
                     str(tempdir),
                 )
-                zmqr = ZmqReceiver(args.logaddr, args.logport, proxy=null_proxy)
+                zmqr = ZmqReceiver(
+                    scanners=parse_scanners(args.scanners), proxy=null_proxy
+                )
                 prom_vars = init_prom_vars()
                 context = zstandard.ZstdCompressor()
                 freq_start = 100e6
@@ -184,8 +183,9 @@ class SigFinderTestCase(unittest.TestCase):
                 scan_config = {
                     "freq_start": freq_start,
                     "freq_end": freq_end,
+                    "sample_rate": int(1e6),
                 }
-                with open(zmqr.buff_file, "wb") as zbf:
+                with open(zmqr.scanners[0].buff_file, "wb") as zbf:
                     with context.stream_writer(zbf) as bf:
                         for _ in range(2):
                             output = {
@@ -194,6 +194,7 @@ class SigFinderTestCase(unittest.TestCase):
                                 "config": {
                                     "freq_start": freq_start,
                                     "freq_end": freq_end,
+                                    "sample_rate": int(1e6),
                                 },
                                 "buckets": {},
                             }
@@ -236,8 +237,7 @@ class SigFinderTestCase(unittest.TestCase):
             1,
             "",
             "",
-            "127.0.0.1",
-            9999,
+            "127.0.0.1:9999",
             10,
             1,
             1,
@@ -255,13 +255,16 @@ class SigFinderTestCase(unittest.TestCase):
             shutdown_str = b"shutdown\n"
             context = zmq.Context()
             socket = context.socket(zmq.PUB)
-            socket.bind(f"tcp://{args.logaddr}:{args.logport}")
+            scanners = parse_scanners(args.scanners)
+            scanner = scanners[0]
+            addr, port = scanner
+            socket.bind(f"tcp://{addr}:{port}")
 
             with concurrent.futures.ProcessPoolExecutor(1) as executor:
                 executor.submit(
                     fft_proxy,
-                    args.logaddr,
-                    args.logport,
+                    addr,
+                    port,
                     buff_file,
                     1,
                     live_file=live_file,

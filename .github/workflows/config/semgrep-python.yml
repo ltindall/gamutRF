@@ -7158,24 +7158,6 @@ rules:
     - python
   pattern: open("=~/^\/tmp.*/", ...)
   severity: WARNING
-- id: arbitrary-sleep
-  languages:
-  - python
-  message: time.sleep() call; did you mean to leave this in?
-  metadata:
-    category: best-practice
-    technology:
-    - python
-  patterns:
-  - pattern-not: time.sleep($F(...))
-  - pattern-either:
-    - pattern: 'time.sleep($X: int)
-
-        '
-    - pattern: 'time.sleep($X: float)
-
-        '
-  severity: ERROR
 - id: python-debugger-found
   languages:
   - python
@@ -9477,9 +9459,7 @@ rules:
 - id: avoid-bind-to-all-interfaces
   languages:
   - python
-  message: Running `socket.bind` to 0.0.0.0, ::, or empty string could unexpectedly
-    expose the server publicly as it binds to all available interfaces. Consider instead
-    getting correct address from an environment variable or configuration file.
+  message: "Running `socket.bind` to 0.0.0.0, ::, or empty string could unexpectedly expose the server publicly as it binds to all available interfaces. Consider instead getting correct address from an environment variable or configuration file."
   metadata:
     category: security
     confidence: HIGH

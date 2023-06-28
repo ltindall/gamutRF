@@ -34,9 +34,11 @@ FFT_FILE = "/dev/shm/fft.dat"  # nosec
 
 
 class SDRRecorder:
-    def __init__(self):
+    def __init__(self, sdrargs, rotate_secs):
         self.tmpdir = tempfile.TemporaryDirectory()
         self.zst_fifo = os.path.join(self.tmpdir.name, "zstfifo")
+        self.sdrargs = sdrargs
+        self.rotate_secs = rotate_secs
         os.mkfifo(self.zst_fifo)
 
     @staticmethod
@@ -164,10 +166,15 @@ class SDRRecorder:
         sdr,
         antenna,
     ):
-        epoch_time = str(int(time.time()))
+        epoch_time = int(time.time())
         meta_time = datetime.datetime.utcnow().isoformat() + "Z"
+        if self.rotate_secs:
+            ts_dir = int(epoch_time / self.rotate_secs) * self.rotate_secs
+            path = os.path.join(path, str(ts_dir))
+            if not os.path.exists(path):
+                os.makedirs(path)
         sample_file = self.get_sample_file(
-            path, epoch_time, center_freq, sample_rate, sdr, antenna, gain
+            path, str(epoch_time), center_freq, sample_rate, sdr, antenna, gain
         )
         record_status = -1
         try:
@@ -203,12 +210,33 @@ class SDRRecorder:
 
 
 class EttusRecorder(SDRRecorder):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, sdrargs, rotate_secs):
+        super().__init__(sdrargs, rotate_secs)
         self.worker_subprocess = None
         self.last_worker_line = None
-        # TODO: troubleshoot why this doesn't find an Ettus initially, still.
-        # subprocess.call(['uhd_find_devices'])
+        if not self.sdrargs:
+            self.sdrargs = ETTUS_ARGS
+        try:
+            subprocess.check_call(
+                [
+                    "/usr/local/bin/uhd_sample_recorder",
+                    "--rate",
+                    str(1e6),
+                    "--args",
+                    self.sdrargs,
+                    "--ant",
+                    ETTUS_ANT,
+                    "--duration",
+                    "1",
+                    "--null",
+                    "--fftnull",
+                    "--novkfft",
+                    "--nfft",
+                    "0",
+                ]
+            )
+        except subprocess.CalledProcessError:
+            raise ValueError
 
     def record_args(
         self, sample_file, sample_rate, sample_count, center_freq, gain, _agc, rxb
@@ -227,7 +255,7 @@ class EttusRecorder(SDRRecorder):
             "--gain",
             str(gain),
             "--args",
-            ETTUS_ARGS,
+            self.sdrargs,
             "--ant",
             ETTUS_ANT,
             "--spb",
@@ -357,14 +385,12 @@ class LimeRecorder(SDRRecorder):
 
 
 class FileTestRecorder(SDRRecorder):
-    test_file = None
-
     def record_args(
         self, sample_file, sample_rate, sample_count, center_freq, gain, agc, rxb
     ):
         args = [
             "dd",
-            f"if={urlparse(self.test_file).path}",
+            f"if={urlparse(self.sdrargs).path}",
             f"of={sample_file}",
             f"count={int(sample_count)}",
             f"bs={int(sample_rate)}",
@@ -379,10 +405,8 @@ RECORDER_MAP = {
 }
 
 
-def get_recorder(recorder_name):
+def get_recorder(recorder_name, sdrargs=None, rotate_secs=0):
     try:
-        return RECORDER_MAP[recorder_name]()
+        return RECORDER_MAP[recorder_name](sdrargs, rotate_secs)
     except KeyError:
-        recorder = FileTestRecorder
-        recorder.test_file = recorder_name
-        return recorder
+        return FileTestRecorder(recorder_name, rotate_secs)

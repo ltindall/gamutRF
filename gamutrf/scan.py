@@ -1,5 +1,6 @@
 import logging
 import signal
+import time
 import sys
 from argparse import ArgumentParser
 
@@ -9,9 +10,10 @@ try:
     from gnuradio import gr  # pytype: disable=import-error
     from gnuradio.eng_arg import eng_float  # pytype: disable=import-error
     from gnuradio.eng_arg import intx  # pytype: disable=import-error
-except ModuleNotFoundError:  # pragma: no cover
+except ModuleNotFoundError as err:  # pragma: no cover
     print(
-        "Run from outside a supported environment, please run via Docker (https://github.com/IQTLabs/gamutRF#readme)"
+        "Run from outside a supported environment, please run via Docker (https://github.com/IQTLabs/gamutRF#readme): %s"
+        % err
     )
     sys.exit(1)
 
@@ -19,13 +21,20 @@ from prometheus_client import Gauge
 from prometheus_client import start_http_server
 
 from gamutrf.grscan import grscan
+from gamutrf.flask_handler import FlaskHandler
+
+running = True
 
 
 def init_prom_vars():
     prom_vars = {
         "freq_start_hz": Gauge("freq_start_hz", "start of scanning range in Hz"),
         "freq_end_hz": Gauge("freq_end_hz", "end of scanning range in Hz"),
+        "igain": Gauge("igain", "input gain"),
+        "tune_overlap": Gauge("tune_overlap", "multiple of samp_rate when retuning"),
+        "tune_step_fft": Gauge("tune_step_fft", "tune FFT step (0 is use sweep_sec)"),
         "sweep_sec": Gauge("sweep_sec", "scan sweep rate in seconds"),
+        "run_timestamp": Gauge("run_timestamp", "updated when flowgraph is running"),
     }
     return prom_vars
 
@@ -124,6 +133,20 @@ def argument_parser():
         help="Prometheus client port",
     )
     parser.add_argument(
+        "--apiport",
+        dest="apiport",
+        type=int,
+        default=9001,
+        help="API server port",
+    )
+    parser.add_argument(
+        "--rotate_secs",
+        dest="rotate_secs",
+        type=int,
+        default=900,
+        help="rotate storage directories every N seconds",
+    )
+    parser.add_argument(
         "--sdr",
         dest="sdr",
         type=str,
@@ -148,15 +171,42 @@ def argument_parser():
         "--tuneoverlap",
         dest="tuneoverlap",
         type=float,
-        default=0.5,
+        default=0.85,
         help="multiple of samp_rate when retuning",
     )
     parser.add_argument(
         "--bucket_range",
         dest="bucket_range",
         type=float,
-        default=1.0,
+        default=0.85,
         help="what proportion of FFT buckets to use",
+    )
+    parser.add_argument(
+        "--db_clamp_floor",
+        dest="db_clamp_floor",
+        type=float,
+        default=-200,
+        help="clamp dB output floor",
+    )
+    parser.add_argument(
+        "--db_clamp_ceil",
+        dest="db_clamp_ceil",
+        type=float,
+        default=50,
+        help="clamp dB output ceil",
+    )
+    parser.add_argument(
+        "--dc_block_len",
+        dest="dc_block_len",
+        type=int,
+        default=0,
+        help="if > 0, use dc_block_cc filter with length",
+    )
+    parser.add_argument(
+        "--dc_block_long",
+        dest="dc_block_long",
+        action="store_true",
+        help="Use dc_block_cc long form",
     )
     parser.add_argument(
         "--inference_plan_file",
@@ -186,7 +236,116 @@ def argument_parser():
         default="",
         help="tuning ranges (overriding freq_start and freq_end)",
     )
+    parser.add_argument(
+        "--description",
+        dest="description",
+        type=str,
+        default="",
+        help="optional text description to provide with scanner updates",
+    )
+    parser.add_argument(
+        "--scaling",
+        dest="scaling",
+        type=str,
+        default="spectrum",
+        help="""Same as --scaling parameter in scipy.signal.spectrogram(). 
+        Selects between computing the power spectral density ('density') 
+        where `Sxx` has units of V**2/Hz and computing the power
+        spectrum ('spectrum') where `Sxx` has units of V**2, if `x`
+        is measured in V and `fs` is measured in Hz. Defaults to
+        'spectrum'.""",
+    )
     return parser
+
+
+def check_options(options):
+    if options.samp_rate % options.nfft:
+        print("NFFT should be a factor of sample rate")
+
+    if options.freq_start > options.freq_end:
+        return "freq_start must be less than freq_end"
+
+    if options.freq_end > 6e9:
+        return "freq_end must be less than 6GHz"
+
+    if options.freq_start < 70e6:
+        return "freq_start must be at least 70MHz"
+
+    if options.write_samples and not options.sample_dir:
+        return "Must provide --sample_dir when writing samples/points"
+
+    if options.scaling not in ["spectrum", "density"]:
+        return "scaling must be 'spectrum' or 'density'"
+
+    return ""
+
+
+def sig_handler(_sig=None, _frame=None):
+    global running
+    running = False
+
+
+def run_loop(options, prom_vars, wavelearner):
+    reconfigures = 0
+    global running
+    running = True
+
+    signal.signal(signal.SIGINT, sig_handler)
+    signal.signal(signal.SIGTERM, sig_handler)
+
+    handler = FlaskHandler(options, check_options, ["promport", "apiport"])
+    handler.start()
+
+    while running:
+        prom_vars["freq_start_hz"].set(handler.options.freq_start)
+        prom_vars["freq_end_hz"].set(handler.options.freq_end)
+        prom_vars["igain"].set(handler.options.igain)
+        prom_vars["sweep_sec"].set(handler.options.sweep_sec)
+        prom_vars["tune_overlap"].set(handler.options.tuneoverlap)
+        prom_vars["tune_step_fft"].set(handler.options.tune_step_fft)
+        tb = grscan(
+            freq_end=handler.options.freq_end,
+            freq_start=handler.options.freq_start,
+            tuning_ranges=handler.options.tuning_ranges,
+            igain=handler.options.igain,
+            sweep_sec=handler.options.sweep_sec,
+            tune_overlap=handler.options.tuneoverlap,
+            tune_step_fft=handler.options.tune_step_fft,
+            samp_rate=handler.options.samp_rate,
+            logaddr=handler.options.logaddr,
+            logport=handler.options.logport,
+            sdr=handler.options.sdr,
+            sdrargs=handler.options.sdrargs,
+            fft_size=handler.options.nfft,
+            skip_tune_step=handler.options.skip_tune_step,
+            sample_dir=handler.options.sample_dir,
+            write_samples=handler.options.write_samples,
+            bucket_range=handler.options.bucket_range,
+            db_clamp_floor=handler.options.db_clamp_floor,
+            db_clamp_ceil=handler.options.db_clamp_ceil,
+            dc_block_len=handler.options.dc_block_len,
+            dc_block_long=handler.options.dc_block_long,
+            inference_plan_file=handler.options.inference_plan_file,
+            inference_output_dir=handler.options.inference_output_dir,
+            inference_input_len=handler.options.inference_input_len,
+            scaling=handler.options.scaling,
+            rotate_secs=handler.options.rotate_secs,
+            description=handler.options.description,
+            iqtlabs=iqtlabs,
+            wavelearner=wavelearner,
+        )
+        tb.start()
+        while running and reconfigures == handler.reconfigures:
+            idle_time = 1
+            prom_vars["run_timestamp"].set(time.time()),
+            time.sleep(idle_time)
+
+        while reconfigures != handler.reconfigures:
+            reconfigures = handler.reconfigures
+
+        tb.stop()
+        tb.wait()
+        del tb
 
 
 def main():
@@ -194,25 +353,9 @@ def main():
     options = argument_parser().parse_args()
     if gr.enable_realtime_scheduling() != gr.RT_OK:
         print("Warning: failed to enable real-time scheduling.")
-
-    if options.freq_start > options.freq_end:
-        print("Error: freq_start must be less than freq_end")
-        sys.exit(1)
-
-    if options.freq_end > 6e9:
-        print("Error: freq_end must be less than 6GHz")
-        sys.exit(1)
-
-    if options.freq_start < 70e6:
-        print("Error: freq_start must be at least 70MHz")
-        sys.exit(1)
-
-    # ensure tuning tags arrive on FFT window boundaries.
-    if options.samp_rate % options.nfft:
-        print("NFFT should be a factor of sample rate")
-
-    if options.write_samples and not options.sample_dir:
-        print("Must provide --sample_dir when writing samples/points")
+    results = check_options(options)
+    if results:
+        print(results)
         sys.exit(1)
 
     wavelearner = None
@@ -225,43 +368,6 @@ def main():
         print("wavelearner not available")
 
     prom_vars = init_prom_vars()
-    prom_vars["freq_start_hz"].set(options.freq_start)
-    prom_vars["freq_end_hz"].set(options.freq_end)
-    prom_vars["sweep_sec"].set(options.sweep_sec)
     start_http_server(options.promport)
 
-    tb = grscan(
-        freq_end=options.freq_end,
-        freq_start=options.freq_start,
-        igain=options.igain,
-        samp_rate=options.samp_rate,
-        sweep_sec=options.sweep_sec,
-        logaddr=options.logaddr,
-        logport=options.logport,
-        sdr=options.sdr,
-        sdrargs=options.sdrargs,
-        fft_size=options.nfft,
-        tune_overlap=options.tuneoverlap,
-        tune_step_fft=options.tune_step_fft,
-        skip_tune_step=options.skip_tune_step,
-        sample_dir=options.sample_dir,
-        write_samples=options.write_samples,
-        bucket_range=options.bucket_range,
-        tuning_ranges=options.tuning_ranges,
-        inference_plan_file=options.inference_plan_file,
-        inference_output_dir=options.inference_output_dir,
-        inference_input_len=options.inference_input_len,
-        iqtlabs=iqtlabs,
-        wavelearner=wavelearner,
-    )
-
-    def sig_handler(_sig=None, _frame=None):
-        tb.stop()
-        tb.wait()
-        sys.exit(0)
-
-    signal.signal(signal.SIGINT, sig_handler)
-    signal.signal(signal.SIGTERM, sig_handler)
-
-    tb.start()
-    tb.wait()
+    run_loop(options, prom_vars, wavelearner)
