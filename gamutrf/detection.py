@@ -15,7 +15,7 @@ from PIL import Image
 import json
 
 from ultralytics import YOLO
-from roboflow import Roboflow
+#from roboflow import Roboflow
 
 
 SAMPLE_FILENAME_RE = re.compile(r"^.+_([0-9]+)_([0-9]+)Hz_([0-9]+)sps\.(s\d+|raw).*$")
@@ -62,7 +62,38 @@ def get_reader(filename):
 def is_fft(filename):
     return os.path.basename(filename).startswith("fft_")
 
+def supported_filetype(filename): 
+    supported_filetypes = ([
+        ".zst",
+        ".gz",
+        ".bz2",
+        ".raw",
+        ".s8",
+        ".s16",
+        ".s32",
+        ".u8",
+        ".u16",
+        ".u32",
+    ]) 
+    if not any([filename.endswith(supported) for supported in supported_filetypes]): 
+        return False
+    return True
+    
 def parse_filename(filename):
+    # supported_filetypes = ([
+    #     ".zst",
+    #     ".gz",
+    #     ".bz2",
+    #     ".raw",
+    #     ".s8",
+    #     ".s16",
+    #     ".s32",
+    #     ".u8",
+    #     ".u16",
+    #     ".u32",
+    # ])
+    # if not any([filename.endswith(supported) for supported in supported_filetypes]): 
+    #     return None
     # FFT is always float not matter the original sample type.
     if is_fft(filename):
         print("Skipping FFT file "+filename)
@@ -278,7 +309,7 @@ def main():
                 freq_bins, t_bins, spectrogram = signal.spectrogram(
                     samples,
                     file_info["sample_rate"],
-                    window=signal.hann(int(nfft), sym=True),
+                    window=signal.windows.hann(int(nfft), sym=True),
                     nperseg=nfft,
                     noverlap=noverlap,
                     detrend='constant',
