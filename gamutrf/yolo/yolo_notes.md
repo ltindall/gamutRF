@@ -1,5 +1,13 @@
 # Setup (AIR-T specific) 
 
+## libgomp
+```
+cd /home/ltindall/.conda/envs/airt-py39/lib/python3.9/site-packages/torch/lib/../../torch.libs/
+mv libgomp-d22c30c5.so.1.0.0 libgomp-d22c30c5.so.1.0.0_bak
+ln -s /home/ltindall/.conda/envs/airt-py39/bin/../lib/./libgomp.so.1 libgomp-d22c30c5.so.1.0.0
+export LD_PRELOAD=/home/ltindall/.conda/envs/airt-py39/bin/../lib/./libgomp.so.1
+```
+
 ## Create conda env  
 
 `conda env create -f airstack-py36-yolo.yml`
