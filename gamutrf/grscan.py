@@ -163,7 +163,7 @@ class grscan(gr.top_block):
             y = 640
             image_shape = (x, y, 3)
             image_vlen = np.prod(image_shape)
-            prediction_shape = (1, 8, 8400)
+            prediction_shape = (1, 6, 8400)
             prediction_vlen = np.prod(prediction_shape)
             Path(inference_output_dir).mkdir(parents=True, exist_ok=True)
             Path(inference_output_dir, "images").mkdir(parents=True, exist_ok=True)
@@ -177,7 +177,7 @@ class grscan(gr.top_block):
                 norm_alpha=0,
                 norm_beta=1,
                 norm_type=32,  # cv::NORM_MINMAX = 32
-                colormap=16,  # cv::COLORMAP_VIRIDIS = 16, cv::COLORMAP_TURBO = 20,
+                colormap=20,  # cv::COLORMAP_VIRIDIS = 16, cv::COLORMAP_TURBO = 20,
                 interpolation=1,  # cv::INTER_LINEAR = 1,
                 flip=0,
             )
@@ -223,6 +223,8 @@ class grscan(gr.top_block):
             ]
 
             self.yolo_bbox_block = yolo_bbox(
+                n_fft=fft_size,
+                n_time=tune_step_fft,
                 image_shape=image_shape,
                 prediction_shape=prediction_shape,
                 batch_size=inference_batch_size,
