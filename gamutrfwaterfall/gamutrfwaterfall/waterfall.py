@@ -5,18 +5,21 @@ import json
 import logging
 import multiprocessing
 import os
+import requests
 import shutil
 import signal
 import tempfile
 import time
 import warnings
 from pathlib import Path
+from prometheus_client.parser import text_string_to_metric_families
+
 
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import zmq
-from flask import Flask, current_app, send_file
+from flask import Flask, current_app, send_file, render_template, send_from_directory, request
 from matplotlib.collections import LineCollection
 from matplotlib.ticker import MultipleLocator, AutoMinorLocator
 from matplotlib import style
@@ -30,6 +33,17 @@ warnings.filterwarnings(action="ignore", message="All-NaN slice encountered")
 warnings.filterwarnings(action="ignore", message="Degrees of freedom <= 0 for slice.")
 
 SCAN_FRES = 1e4
+
+PROMETHEUS_VARS = {
+    "freq_start": None,
+    "freq_end": None,
+    "igain": None,
+    "tuneoverlap": None,
+    "tune_step_fft": None,
+    "sweep_sec": None,
+    "run_timestamp": None,
+}
+
 
 
 def safe_savefig(path):
@@ -234,7 +248,7 @@ def argument_parser():
         "--scanners",
         default="127.0.0.1:8001",
         type=str,
-        help="Scanner endpoints to use.",
+        help="Scanner FFT endpoints to use.",
     )
     parser.add_argument(
         "--port",
@@ -295,6 +309,18 @@ def argument_parser():
         default=10002,
         type=int,
         help="Port on scanner to connect to inference feed",
+    )
+    parser.add_argument(
+        "--api_endpoint",
+        default="127.0.0.1:9001",
+        type=str,
+        help="Scanner API endpoints to use.",
+    )
+    parser.add_argument(
+        "--prometheus_endpoint",
+        default="127.0.0.1:9000",
+        type=str,
+        help="Prometheus endpoints to use.",
     )
     return parser
 
@@ -926,6 +952,9 @@ def waterfall(
     batch,
     refresh,
     zmqr,
+    prometheus_endpoint,
+    prometheus_vars,
+    prometheus_vars_path,
 ):
     style.use("fast")
 
@@ -997,6 +1026,9 @@ def waterfall(
                 (scan_configs, frame_resample(scan_df, config.freq_resolution * 1e6))
             ]
 
+            if prometheus_vars_path:
+                get_scanner_args(prometheus_endpoint, prometheus_vars, prometheus_vars_path)
+
             need_reconfig = False
             need_init = True
         if need_init:
@@ -1061,31 +1093,57 @@ def waterfall(
             time.sleep(0.1)
     zmqr.stop()
 
+def get_scanner_args(prometheus_endpoint, prometheus_vars, prometheus_vars_path):
+    try:
+        response = requests.get(f"http://{prometheus_endpoint}")
+
+        for metric in text_string_to_metric_families(response):
+            for sample in metric.samples:
+                if sample.name in prometheus_vars:
+                    prometheus_vars[sample.name] = sample.value
+
+        with open(prometheus_vars_path, 'w') as f:
+            json.dump(prometheus_vars, f)
+    except requests.exceptions.ConnectionError:
+        pass
 
 class FlaskHandler:
     def __init__(
         self,
         savefig_path,
-        static_folder,
+        #static_folder,
+        tempdir,
         predictions,
         port,
         refresh,
         inference_server,
         inference_port,
+        api_endpoint,
+        prometheus_vars,
+        prometheus_vars_path,
     ):
         self.inference_addr = f"tcp://{inference_server}:{inference_port}"
         self.savefig_path = savefig_path
-        self.static_folder = static_folder
+        self.prometheus_vars = prometheus_vars
+        self.prometheus_vars_path = prometheus_vars_path
+        #self.static_folder = static_folder
+        self.tempdir = tempdir
         self.predictions_file = "predictions.html"
         self.refresh = refresh
         self.predictions = predictions
-        self.app = Flask(__name__, static_folder=self.static_folder)
+        self.api_endpoint = api_endpoint
+        self.app = Flask(__name__, template_folder="templates", static_folder="static")
+        #self.app = Flask(__name__, static_folder=self.static_folder)
         self.savefig_file = os.path.basename(self.savefig_path)
+        self.app.add_url_rule("/", "index", self.serve_waterfall_page)
+        self.app.add_url_rule("/waterfall", "serve_waterfall_page", self.serve_waterfall_page)
+        self.app.add_url_rule("/waterfall_img", "serve_waterfall_img", self.serve_waterfall_img)
+        self.app.add_url_rule("/config_form", "config_form", self.config_form)
         self.app.add_url_rule("/predictions", "predictions", self.serve_predictions)
-        self.app.add_url_rule(
-            "/" + self.savefig_file, self.savefig_file, self.serve_waterfall
-        )
-        self.app.add_url_rule("/", "", self.serve, defaults={"path": ""})
+        # self.app.add_url_rule(
+        #     "/" + self.savefig_file, self.savefig_file, self.serve_waterfall
+        # )
+        #self.app.add_url_rule("/", "", self.serve, defaults={"path": ""})
         self.app.add_url_rule("/<path:path>", "", self.serve)
         self.process = multiprocessing.Process(
             target=self.app.run,
@@ -1099,13 +1157,13 @@ class FlaskHandler:
         self.zmq_process.start()
 
     def write_predictions_content(self, content):
-        tmpfile = os.path.join(self.static_folder, "." + self.predictions_file)
+        tmpfile = os.path.join(self.tempdir, "." + self.predictions_file)
         with open(tmpfile, "w", encoding="utf8") as f:
             f.write(
                 '<html><head><meta http-equiv="refresh" content="%u"></head><body>%s</body></html>'
                 % (self.refresh, content)
             )
-        os.rename(tmpfile, os.path.join(self.static_folder, self.predictions_file))
+        os.rename(tmpfile, os.path.join(self.tempdir, self.predictions_file))
 
     def poll_zmq(self):
         zmq_context = zmq.Context()
@@ -1179,9 +1237,36 @@ class FlaskHandler:
     def serve_predictions(self):
         return current_app.send_static_file(self.predictions_file)
 
-    def serve_waterfall(self):
-        return current_app.send_static_file(self.savefig_file)
+    def serve_waterfall_page(self):
+        
+        try:
+            with open(self.prometheus_vars_path) as f:
+                self.prometheus_vars = json.load(f)
+                print(f"\n\n{self.prometheus_vars=}\n\n")
+        except FileNotFoundError:
+            pass
+        #return current_app.send_static_file(self.savefig_file)
+        return render_template("waterfall.html", prom_vars=self.prometheus_vars)
 
+    # @app.route("/file/<path:filename>")
+    # def serve_file(self, filename):
+    #     return send_from_directory(self.tempdir, filename)
+
+    def serve_waterfall_img(self):
+        return send_from_directory(self.tempdir, self.savefig_file)
+
+    def config_form(self):
+            
+        for var in self.prometheus_vars:
+            self.prometheus_vars[var] = request.form.get(
+                var, self.prometheus_vars[var]
+            )
+        reset = request.form.get("reset", None)
+        if reset == "reset":
+            reconf_query_str = "&".join([f"{k}={v}" for k,v in self.prometheus_vars.items()])
+            response = requests.get(f"http://{self.api_endpoint}/reconf?{reconf_query_str}")
+
+        return redirect(request.referrer)
 
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
@@ -1199,11 +1284,14 @@ def main():
         savefig_path = None
         engine = "GTK3Agg"
         batch = False
+        prometheus_vars_path = None
+        prometheus_vars = PROMETHEUS_VARS
 
         if args.port:
             engine = "agg"
             batch = True
             savefig_path = os.path.join(tempdir, "waterfall.png")
+            prometheus_vars_path = os.path.join(tempdir, "prom_vars.json")
             flask = FlaskHandler(
                 savefig_path,
                 tempdir,
@@ -1212,6 +1300,9 @@ def main():
                 args.refresh,
                 args.inference_server,
                 args.inference_port,
+                args.api_endpoint,
+                prometheus_vars,
+                prometheus_vars_path,
             )
             flask.start()
 
@@ -1237,6 +1328,9 @@ def main():
             batch,
             args.refresh,
             zmqr,
+            args.prometheus_endpoint,
+            prometheus_vars,
+            prometheus_vars_path,
         )
 
 
