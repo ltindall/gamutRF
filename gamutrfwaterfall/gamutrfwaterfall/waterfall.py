@@ -19,7 +19,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import zmq
-from flask import Flask, current_app, send_file, render_template, send_from_directory, request
+from flask import Flask, current_app, send_file, render_template, send_from_directory, request, redirect
 from matplotlib.collections import LineCollection
 from matplotlib.ticker import MultipleLocator, AutoMinorLocator
 from matplotlib import style
@@ -41,7 +41,7 @@ PROMETHEUS_VARS = {
     "tuneoverlap": None,
     "tune_step_fft": None,
     "sweep_sec": None,
-    "run_timestamp": None,
+    #"run_timestamp": None,
 }
 
 
@@ -489,8 +489,8 @@ def init_fig(
     state.minor_tick_separator = AutoMinorLocator()
     state.major_tick_separator = MultipleLocator(config.freq_range / config.n_ticks)
 
-    plt.rcParams["savefig.facecolor"] = "#2A3459"
-    plt.rcParams["figure.facecolor"] = "#2A3459"
+    plt.rcParams["savefig.facecolor"] = "#1e1e1e"#"#2A3459"
+    plt.rcParams["figure.facecolor"] = "#1e1e1e"#"#2A3459"
     for param in (
         "text.color",
         "axes.labelcolor",
@@ -498,7 +498,7 @@ def init_fig(
         "ytick.color",
         "axes.facecolor",
     ):
-        plt.rcParams[param] = "#d2d5dd"
+        plt.rcParams[param] = "#cdcdcd"#"#d2d5dd"
 
     state.fig = plt.figure(figsize=(config.width, config.height), dpi=100)
     if not config.batch:
@@ -1096,16 +1096,17 @@ def waterfall(
 def get_scanner_args(prometheus_endpoint, prometheus_vars, prometheus_vars_path):
     try:
         response = requests.get(f"http://{prometheus_endpoint}")
+        response.raise_for_status()
 
-        for metric in text_string_to_metric_families(response):
+        for metric in text_string_to_metric_families(response.text):
             for sample in metric.samples:
                 if sample.name in prometheus_vars:
                     prometheus_vars[sample.name] = sample.value
 
         with open(prometheus_vars_path, 'w') as f:
             json.dump(prometheus_vars, f)
-    except requests.exceptions.ConnectionError:
-        pass
+    except (requests.exceptions.ConnectionError, requests.exceptions.HTTPError) as err:
+        logging.error(err)
 
 class FlaskHandler:
     def __init__(
@@ -1126,6 +1127,7 @@ class FlaskHandler:
         self.savefig_path = savefig_path
         self.prometheus_vars = prometheus_vars
         self.prometheus_vars_path = prometheus_vars_path
+        self.prometheus_vars_set = False
         #self.static_folder = static_folder
         self.tempdir = tempdir
         self.predictions_file = "predictions.html"
@@ -1138,7 +1140,7 @@ class FlaskHandler:
         self.app.add_url_rule("/", "index", self.serve_waterfall_page)
         self.app.add_url_rule("/waterfall", "serve_waterfall_page", self.serve_waterfall_page)
         self.app.add_url_rule("/waterfall_img", "serve_waterfall_img", self.serve_waterfall_img)
-        self.app.add_url_rule("/config_form", "config_form", self.config_form)
+        self.app.add_url_rule("/config_form", "config_form", self.config_form, methods=["POST", "GET"])
         self.app.add_url_rule("/predictions", "predictions", self.serve_predictions)
         # self.app.add_url_rule(
         #     "/" + self.savefig_file, self.savefig_file, self.serve_waterfall
@@ -1151,6 +1153,7 @@ class FlaskHandler:
         )
         self.zmq_process = multiprocessing.Process(target=self.poll_zmq)
         self.write_predictions_content("no predictions yet")
+        self.read_prometheus_vars()
 
     def start(self):
         self.process.start()
@@ -1237,14 +1240,19 @@ class FlaskHandler:
     def serve_predictions(self):
         return current_app.send_static_file(self.predictions_file)
 
-    def serve_waterfall_page(self):
-        
+    def read_prometheus_vars(self):
         try:
             with open(self.prometheus_vars_path) as f:
                 self.prometheus_vars = json.load(f)
                 print(f"\n\n{self.prometheus_vars=}\n\n")
+            self.prometheus_vars_set = True
         except FileNotFoundError:
             pass
+
+    def serve_waterfall_page(self):
+        
+        if not self.prometheus_vars_set: 
+            self.read_prometheus_vars()
         #return current_app.send_static_file(self.savefig_file)
         return render_template("waterfall.html", prom_vars=self.prometheus_vars)
 
@@ -1256,16 +1264,19 @@ class FlaskHandler:
         return send_from_directory(self.tempdir, self.savefig_file)
 
     def config_form(self):
-            
+        logging.info(f"\n\n{self.prometheus_vars}\n\n")
         for var in self.prometheus_vars:
             self.prometheus_vars[var] = request.form.get(
                 var, self.prometheus_vars[var]
             )
+        logging.info(f"\n\n{self.prometheus_vars}\n\n")
         reset = request.form.get("reset", None)
         if reset == "reset":
             reconf_query_str = "&".join([f"{k}={v}" for k,v in self.prometheus_vars.items()])
+            logging.info(f"\n\n{reconf_query_str=}\n\n")
             response = requests.get(f"http://{self.api_endpoint}/reconf?{reconf_query_str}")
-
+            logging.info(f"\n\n{response=}\n\n")
+            logging.info(f"\n\n{response.text=}\n\n")
         return redirect(request.referrer)
 
 def main():
