@@ -354,6 +354,7 @@ def reset_fig(
     state.fig.clf()
     plt.tight_layout()
     plt.subplots_adjust(hspace=0.15)
+    plt.subplots_adjust(left=0.20)
     state.ax_psd = state.fig.add_subplot(3, 1, 1)
     state.ax = state.fig.add_subplot(3, 1, (2, 3))
     state.psd_title = state.ax_psd.text(
@@ -1141,7 +1142,8 @@ class FlaskHandler:
         self.app.add_url_rule("/waterfall", "serve_waterfall_page", self.serve_waterfall_page)
         self.app.add_url_rule("/waterfall_img", "serve_waterfall_img", self.serve_waterfall_img)
         self.app.add_url_rule("/config_form", "config_form", self.config_form, methods=["POST", "GET"])
-        self.app.add_url_rule("/predictions", "predictions", self.serve_predictions)
+        self.app.add_url_rule("/predictions", "serve_predictions_page", self.serve_predictions_page)
+        self.app.add_url_rule("/predictions_content", "serve_predictions_content", self.serve_predictions_content)
         # self.app.add_url_rule(
         #     "/" + self.savefig_file, self.savefig_file, self.serve_waterfall
         # )
@@ -1162,10 +1164,11 @@ class FlaskHandler:
     def write_predictions_content(self, content):
         tmpfile = os.path.join(self.tempdir, "." + self.predictions_file)
         with open(tmpfile, "w", encoding="utf8") as f:
-            f.write(
-                '<html><head><meta http-equiv="refresh" content="%u"></head><body>%s</body></html>'
-                % (self.refresh, content)
-            )
+            # f.write(
+            #     '<html><head><meta http-equiv="refresh" content="%u"></head><body>%s</body></html>'
+            #     % (self.refresh, content)
+            # )
+            f.write(f"{content}")
         os.rename(tmpfile, os.path.join(self.tempdir, self.predictions_file))
 
     def poll_zmq(self):
@@ -1236,9 +1239,12 @@ class FlaskHandler:
             % self.refresh,
             200,
         )
-
-    def serve_predictions(self):
-        return current_app.send_static_file(self.predictions_file)
+    def serve_predictions_content(self):
+        return send_from_directory(self.tempdir, self.predictions_file)
+    
+    def serve_predictions_page(self):
+        #return send_from_directory(self.tempdir, self.predictions_file)
+        return render_template("predictions.html")
 
     def read_prometheus_vars(self):
         try:
