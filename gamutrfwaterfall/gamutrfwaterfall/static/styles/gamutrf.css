@@ -1,3 +1,7 @@
+#waterfall {
+    margin-top: -20px;
+}
+
 .content_container {
     display: flex;  /*sets form and image next to each other*/  
     /*border-radius: 2%;
