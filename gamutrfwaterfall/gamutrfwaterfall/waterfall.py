@@ -1037,7 +1037,8 @@ def waterfall(
             ]
 
             if prometheus_vars_path:
-                get_scanner_args(prometheus_endpoint, prometheus_vars, prometheus_vars_path)
+                get_scanner_args(prometheus_endpoint, prometheus_vars)
+                write_scanner_args(prometheus_vars_path, prometheus_vars)
 
             need_reconfig = False
             need_init = True
@@ -1103,7 +1104,7 @@ def waterfall(
             time.sleep(0.1)
     zmqr.stop()
 
-def get_scanner_args(prometheus_endpoint, prometheus_vars, prometheus_vars_path):
+def get_scanner_args(prometheus_endpoint, prometheus_vars):
     try:
         response = requests.get(f"http://{prometheus_endpoint}")
         response.raise_for_status()
@@ -1113,10 +1114,16 @@ def get_scanner_args(prometheus_endpoint, prometheus_vars, prometheus_vars_path)
                 if sample.name in prometheus_vars:
                     prometheus_vars[sample.name] = sample.value
 
-        with open(prometheus_vars_path, 'w') as f:
-            json.dump(prometheus_vars, f)
     except (requests.exceptions.ConnectionError, requests.exceptions.HTTPError) as err:
         logging.error(err)
+
+
+def write_scanner_args(prometheus_vars_path, prometheus_vars):
+
+    tmpfile = os.path.join(os.path.dirname(prometheus_vars_path), "."+os.path.basename(prometheus_vars_path))
+    with open(tmpfile, 'w') as f:
+        json.dump(prometheus_vars, f)
+    os.rename(tmpfile, prometheus_vars_path)
 
 class FlaskHandler:
     def __init__(
@@ -1266,9 +1273,7 @@ class FlaskHandler:
 
     def serve_waterfall_page(self):
         
-        if not self.prometheus_vars_set: 
-            self.read_prometheus_vars()
-        #return current_app.send_static_file(self.savefig_file)
+        self.read_prometheus_vars()
         return render_template("waterfall.html", prom_vars=self.prometheus_vars)
 
     # @app.route("/file/<path:filename>")
@@ -1284,6 +1289,7 @@ class FlaskHandler:
             self.prometheus_vars[var] = request.form.get(
                 var, self.prometheus_vars[var]
             )
+        write_scanner_args(self.prometheus_vars_path, self.prometheus_vars)
         logging.info(f"\n\n{self.prometheus_vars}\n\n")
         reset = request.form.get("reset", None)
         if reset == "reset":
