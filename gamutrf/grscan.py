@@ -23,6 +23,7 @@ except ModuleNotFoundError as err:  # pragma: no cover
     )
     sys.exit(1)
 
+from gamutrf.correctiq import dc_spike_removal, dc_spike_detrend
 from gamutrf.grsource import get_source
 from gamutrf.grinferenceoutput import inferenceoutput
 from gamutrf.grpduzmq import pduzmq
@@ -513,7 +514,7 @@ class grscan(gr.top_block):
     def get_dc_blocks(self, dc_block_len, dc_block_long):
         if dc_block_len:
             return [grfilter.dc_blocker_cc(dc_block_len, dc_block_long)]
-        return []
+        return [dc_spike_detrend()]
 
     def get_fft_blocks(
         self,
