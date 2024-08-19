@@ -513,6 +513,7 @@ class grscan(gr.top_block):
 
     def get_dc_blocks(self, dc_block_len, dc_block_long):
         if dc_block_len:
+            logging.info("\n dc_block_len \n")
             return [grfilter.dc_blocker_cc(dc_block_len, dc_block_long)]
         return [dc_spike_detrend()]
 

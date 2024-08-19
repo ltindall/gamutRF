@@ -7,8 +7,9 @@ from scipy import signal
 try:
 
     from gnuradio import gr  # pytype: disable=import-error
+    from cupyx.scipy import signal as cupy_signal
 
-except ModuleNotFoundError as err:  # pragma: no cover
+except (ModuleNotFoundError, ImportError) as err:  # pragma: no cover
     print(
         "Run from outside a supported environment, please run via Docker (https://github.com/IQTLabs/gamutRF#readme): %s"
         % err
@@ -57,10 +58,11 @@ class dc_spike_detrend(gr.sync_block):
         n_output = len(input)
 
         # output_items[0][:] = input_items[0]
+        # output_items[0][:] = input_items[0] - cupy.mean(input_items[0])
         # output_items[0][:] = signal.detrend(input, type="constant")
-        # output_items[0][:] = signal.detrend(input, type="linear", bp=np.arange(0, len(input), self.length))
-        output_items[0][:] = signal.detrend(input, type="linear")
+        output_items[0][:] = signal.detrend(input, type="linear", bp=np.arange(0, len(input), self.length))
+        # output_items[0][:] = signal.detrend(input, type="linear")
 
-        self.total += n_output
+        # self.total += n_output
         return n_output
 
