@@ -2,6 +2,7 @@ import csv
 import datetime
 import json
 import logging
+import math
 import os
 import shutil
 import time
@@ -402,6 +403,27 @@ class WaterfallPlot:
             ]
             if scan_df.empty:
                 continue
+
+            dc_correction_window = 9
+            dc_median_window = 30
+            overlap = 0.9
+            if (scan_configs[0]["freq_end"] - scan_configs[0]["freq_start"])/scan_configs[0]["sample_rate"] > 1:
+                tune_len = scan_df.shape[0]/((scan_configs[0]["freq_end"] - scan_configs[0]["freq_start"])/(overlap*scan_configs[0]["sample_rate"]))
+                for i in range(math.ceil(((scan_configs[0]["freq_end"] - scan_configs[0]["freq_start"])/(overlap*scan_configs[0]["sample_rate"]))) + 1):
+                    scan_median = scan_df["db"].median()
+                    if int(i*tune_len) < scan_df.shape[0]:
+                        start_median = max(0, int(i*tune_len)-int(dc_median_window/2))
+                        end_median = min(scan_df.shape[0], int(i*tune_len)+int(dc_median_window/2))
+                        dc_median = scan_df.loc[scan_df.index[start_median]:scan_df.index[end_median], "db"].median()
+                        start_index = max(0, int(i*tune_len)-int(dc_correction_window/2))
+                        end_index = min(scan_df.shape[0], int(i*tune_len)+int(dc_correction_window/2))
+                        scan_df.loc[scan_df.index[start_index]:scan_df.index[end_index], "db"] = dc_median
+
+                    else:
+                        dc_median = scan_df.loc[scan_df.index[-int(dc_median_window/2)]:scan_df.index[-1], "db"].median()
+                        scan_df.loc[scan_df.index[-int(dc_correction_window/2)]:scan_df.index[-1], "db"] = dc_median
+                        break
+
             tune_step_hz = min(
                 scan_config["tune_step_hz"] for scan_config in scan_configs
             )
@@ -466,9 +488,9 @@ class WaterfallPlot:
             self.state.db_min = np.nanmin(self.state.db_data)
             self.state.db_max = np.nanmax(self.state.db_data)
 
-            self.state.db_max += 0.10 * abs(self.state.db_max)
-            if self.state.db_max - self.state.db_min < 20:
-                self.state.db_max = self.state.db_min + 20
+            # self.state.db_max += 0.10 * abs(self.state.db_max)
+            # if self.state.db_max - self.state.db_min < 20:
+            #     self.state.db_max = self.state.db_min + 20
 
             data, _xedge, _yedge = np.histogram2d(
                 self.state.freq_data[~np.isnan(self.state.freq_data)].flatten(),
